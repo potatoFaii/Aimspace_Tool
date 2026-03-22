@@ -2,6 +2,8 @@
 
 # AimSpace Tool for Autodesk Maya
 
+![UI](https://github.com/user-attachments/assets/d54e7189-923c-497e-b5c1-cc98952021c1)
+
 ## Overview
 **AimSpace** is a personal Maya animation utility inspired by the workflow and concepts shared by  
 **Richard Lico** via [Animation Sherpa](https://www.animationsherpa.com/).
