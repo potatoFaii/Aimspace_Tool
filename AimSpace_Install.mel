@@ -2,7 +2,7 @@ global string $gShelfTopLevel;
 string $currentShelf = `tabLayout -query -selectTab $gShelfTopLevel`;
 setParent $currentShelf;
 
-global proc string defineScriptCommand(string $scriptName, string $filePath, string $mayaScriptDir,  string $function) {
+global proc string defineScriptCommand(string $scriptName,string $functionNamePath, string $filePath, string $mayaScriptDir,  string $function) {
     string $command = 
         "import sys\n" +
         "\n" +
@@ -12,6 +12,7 @@ global proc string defineScriptCommand(string $scriptName, string $filePath, str
         "\n" +
         "try:\n" +
         "   import " + $filePath + "." + $scriptName + " as " + $scriptName + "\n" +
+        "   import " + $filePath + "." + $functionNamePath + " as " + $functionNamePath + "\n" +
         "except ImportError as e:\n" + 
         "   import traceback\n" +
         "   print('Failed to import AimSpace modules:\\n'+ traceback.format_exc())\n" +
@@ -25,13 +26,14 @@ global proc string defineScriptCommand(string $scriptName, string $filePath, str
         "   try:\n" +
         "       reload(module)\n" +
         "   except Exception:\n" +
-        "       import imp\n" +
-        "       imp.reload(module)\n" +
+        "       try:\n" +
+        "           import imp\n" +
+        "           return imp.reload(module)\n" +
+        "       except Exception:\n" +
+        "           return module\n" +
         "\n" +
-        "try:\n" +
-        "   safe_reload(" + $scriptName + ")\n" +
-        "except:\n" +
-        "   pass\n" +
+        "safe_reload(" + $scriptName + ")\n" +
+        "safe_reload(" + $functionNamePath + ")\n" +
         "\n" + 
         "" + $scriptName + "." + $scriptName + "()\n";
     return $command;
@@ -39,6 +41,7 @@ global proc string defineScriptCommand(string $scriptName, string $filePath, str
 
 // Define the variables
 $scriptName= "Aimspace_UI";
+$functionNamePath = "Aimspace_Func";
 $filePath= "IndivPyAimSpace";
 $scriptLoc= `scriptLoc`;
 $sourceFile= $scriptLoc+$scriptName+".py";
@@ -48,7 +51,7 @@ $annot= $scriptName + "\n1. Select controller(s).\n2. Use Script To FUNCTION.\nS
 
 // MenuItem variables
 $baseClassFunction = $scriptName + "()";
-$baseCommand = defineScriptCommand($scriptName, $filePath, $scriptLoc, $baseClassFunction);
+$baseCommand = defineScriptCommand($scriptName,$functionNamePath, $filePath, $scriptLoc, $baseClassFunction);
 
 shelfButton
 	-command $baseCommand
