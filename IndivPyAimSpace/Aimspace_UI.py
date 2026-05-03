@@ -3,20 +3,26 @@ from __future__ import absolute_import
 import os
 import sys
 import math
+import importlib
 try:
     import maya.cmds as cmds
     import maya.mel as mel
 except ImportError:
     pass
-from IndivPyAimSpace.Aimspace_Func import (
-    get_safe_time_range,
-    generateLoc,
-    createLocFunction,
-    createAimSpace,
-    spawnAimLocators,
-    createDisplayLocator,
-    buildAimReference,
-)
+
+# Safe import/reload for iterative Maya development.
+try:
+    from IndivPyAimSpace import Aimspace_Func as Aimspace_Func
+except ImportError:
+    import Aimspace_Func as Aimspace_Func
+
+try:
+    Aimspace_Func = importlib.reload(Aimspace_Func)
+except Exception as e:
+    try:
+        cmds.warning("Aimspace_Func reload skipped: {}".format(e))
+    except Exception:
+        pass
 
 #  - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 # -= Aimspace_UI.py =-
@@ -205,13 +211,13 @@ class Aimspace_UI(object):
     def generateLoc(self, *args):
         axis = 'X' if cmds.radioButton(self.txMnl, q=True, sl=True) else (
                'Y' if cmds.radioButton(self.tyMnl, q=True, sl=True) else 'Z')
-        generateLoc(axis, sliderCtrl=self.sliderMnl, posNegToggle=self.posNegToggle)
+        Aimspace_Func.generateLoc(axis, sliderCtrl=self.sliderMnl, posNegToggle=self.posNegToggle)
 
     def createLocFunction(self, *args):
-        createLocFunction(txMnl=self.txMnl, tyMnl=self.tyMnl, tzMnl=self.tzMnl, cbWorldMn1=self.cbWorldMn1)
+        Aimspace_Func.createLocFunction(txMnl=self.txMnl, tyMnl=self.tyMnl, tzMnl=self.tzMnl, cbWorldMn1=self.cbWorldMn1)
 
     def createAimSpace(self, axis):
-        createAimSpace(axis, self.posNegToggle, intF=self.intF, cbWorldMn1=self.cbWorldMn1)
+        Aimspace_Func.createAimSpace(axis, self.posNegToggle, intF=self.intF, cbWorldMn1=self.cbWorldMn1)
     
     def createXAim(self, *args):
         self.createAimSpace('X')
