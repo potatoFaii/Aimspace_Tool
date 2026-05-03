@@ -105,7 +105,7 @@ def generateLoc(axis, sliderCtrl=None, posNegToggle=None):
         )
         return []
 
-    created_roots = []
+    created_tars = []
 
     cmds.undoInfo(openChunk=True)
     try:
@@ -118,7 +118,7 @@ def generateLoc(axis, sliderCtrl=None, posNegToggle=None):
 
                 root, off, tar = result
                 buildAimReference(off, tar)
-                created_roots.append(root)
+                created_tars.append(tar)
 
                 mel.eval('print ("RESULT : {} locator generate <COMPLETE>\\n")'.format(obj))
         finally:
@@ -126,85 +126,139 @@ def generateLoc(axis, sliderCtrl=None, posNegToggle=None):
     finally:
         cmds.undoInfo(closeChunk=True)
 
-    if created_roots:
-        cmds.select(created_roots, r=True)
+    if created_tars:
+        cmds.select(created_tars, r=True)
 
-    return created_roots
+    return created_tars
 
 def createLocFunction(txMnl=None, tyMnl=None, tzMnl=None, cbWorldMn1=None):
     minTime, maxTime = get_safe_time_range()
     selLoc = cmds.ls(sl=True) or []
     if not selLoc:
-        cmds.warning("Please select one temp aimspace locator to create aimConstraint")
+        cmds.warning("Please select temp aimspace locator(s) to create aimConstraint")
         return
-    loc = selLoc[0]
-    if "_temp_aimspace+" not in loc:
-        cmds.warning("selection not '{}' ,please check".format("_temp_aimspace_")) 
-        return
-    
-    base = loc.split("_temp_aimspace",1)[0] # get back the name of the selection object 
-    target = ("{}_temp_aimspace_target".format(base))
-    root = ("{}_temp_aimspace_root".format(base))
-    offset = ("{}_temp_aimspace_offset".format(base))
-    
-    if cmds.listConnections(target,s=True,type="constraint"):
-        cmds.warning("[{}] already constraint".format(target))
-        return
-    prt = cmds.parentConstraint(base, target, mo=True)
-    cmds.undoInfo(openChunk=True)
-    try:
-        cmds.refresh(suspend=True)
-        try:
-            _bake_nodes([target, root, offset], minTime, maxTime)
-            cmds.filterCurve(target, root, offset)
-            cmds.delete(prt)
-        finally:
-            cmds.refresh(suspend=False)
-    finally:
-        cmds.undoInfo(closeChunk=True)
 
-    cmds.setAttr("{}.rotate".format(offset), 0, 0, 0)
+    bases = []
+    for loc in selLoc:
+        if "_temp_aimspace_" not in loc:
+            continue
+        base = loc.split("_temp_aimspace", 1)[0]
+        if base not in bases:
+            bases.append(base)
+
+    if not bases:
+        cmds.warning("Selection not '{}' ,please check".format("_temp_aimspace_"))
+        return
     
-    def doAim(aimVec, upVec):
-        cmds.aimConstraint(target, offset,
+    def doAim(target_node, offset_node, root_node, aimVec, upVec):
+        cmds.aimConstraint(target_node, offset_node,
                             mo=True,
                             aimVector=aimVec,
                             upVector=upVec,
                             worldUpVector=upVec,
                             worldUpType='objectrotation',
-                            worldUpObject=root)
+                            worldUpObject=root_node)
     
-    axisData = {
-        txMnl: ("X", (1, 0, 0), (-1, 0, 0), (0, 0, 1)),
-        tyMnl: ("Y", (0, 1, 0), (0, -1, 0), (0, 0, 1)),
-        tzMnl: ("Z", (0, 0, 1), (0, 0, -1), (0, 1, 0))
-    }
-    
-    for btn, (axis, posAim, negAim, upVec) in axisData.items():
-        if not cmds.radioButton(btn, q=True, select=True):
+    axisData = [
+        (txMnl, "X", (1, 0, 0), (-1, 0, 0), (0, 0, 1)),
+        (tyMnl, "Y", (0, 1, 0), (0, -1, 0), (0, 0, 1)),
+        (tzMnl, "Z", (0, 0, 1), (0, 0, -1), (0, 1, 0)),
+    ]
+
+    selected_axis_data = None
+    for btn, axis, posAim, negAim, upVec in axisData:
+        if not btn:
             continue
-        tgtVal = cmds.getAttr("{}.translate{}".format(target, axis))
-        srcVal = cmds.getAttr("{}.translate{}".format(base, axis))
-        if tgtVal >= srcVal:
-            mel.eval('print ("RESULT : +{} created\\n")'.format(axis))
-            doAim(posAim, upVec)
-        else:
-            mel.eval('print ("RESULT : -{} created\\n")'.format(axis))
-            doAim(negAim, upVec)
-        break
-    
+        if cmds.radioButton(btn, q=True, select=True):
+            selected_axis_data = (axis, posAim, negAim, upVec)
+            break
+
+    if selected_axis_data is None:
+        selected_axis_data = ("X", (1, 0, 0), (-1, 0, 0), (0, 0, 1))
+
     if cbWorldMn1:
         world = cmds.checkBox(cbWorldMn1, q=True, value=True)
     else:
         world = False
-    if world:
-        cmds.pointConstraint(root, base)
-    else:
-        cmds.pointConstraint(base, root)
-    cmds.orientConstraint(offset, base)
-    cmds.select(deselect=True)
-    cmds.select(target)
-    mel.eval('print ("RESULT : [{}] manual create <COMPLETE>\\n")'.format(target))
+
+    prepared_items = []
+    bake_nodes = []
+    temp_constraints = []
+
+    for base in bases:
+        target = "{}_temp_aimspace_target".format(base)
+        root = "{}_temp_aimspace_root".format(base)
+        offset = "{}_temp_aimspace_offset".format(base)
+
+        missing_nodes = [node for node in (target, root, offset) if not cmds.objExists(node)]
+        if missing_nodes:
+            cmds.warning("Missing temp nodes for [{}]: {}".format(base, ", ".join(missing_nodes)))
+            continue
+
+        existing_target_constraints = cmds.listConnections(target, s=True, type="constraint") or []
+        if existing_target_constraints:
+            try:
+                cmds.delete(list(set(existing_target_constraints)))
+            except Exception as e:
+                cmds.warning("Failed to clear existing constraints on [{}]: {}".format(target, e))
+                continue
+
+        try:
+            prt_target = cmds.parentConstraint(base, target, mo=True)[0]
+            prt_root = cmds.parentConstraint(base, root, mo=True)[0]
+        except Exception as e:
+            cmds.warning("Failed to create bake parentConstraint for [{}]: {}".format(base, e))
+            continue
+
+        temp_constraints.extend([prt_target, prt_root])
+        bake_nodes.extend([target, root])
+        prepared_items.append((base, target, root, offset))
+
+    if not prepared_items:
+        cmds.warning("No valid temp aimspace setup found in selection")
+        return
+
+    unique_bake_nodes = list(dict.fromkeys(bake_nodes))
+
+    cmds.undoInfo(openChunk=True)
+    try:
+        cmds.refresh(suspend=True)
+        try:
+            print(unique_bake_nodes)
+            _bake_nodes(unique_bake_nodes, minTime, maxTime)
+            cmds.filterCurve(*unique_bake_nodes)
+            if temp_constraints:
+                cmds.delete(temp_constraints)
+
+            axis, posAim, negAim, upVec = selected_axis_data
+            final_targets = []
+            for base, target, root, offset in prepared_items:
+                cmds.setAttr("{}.rotate".format(offset), 0, 0, 0)
+
+                tgtVal = cmds.getAttr("{}.translate{}".format(target, axis))
+                srcVal = cmds.getAttr("{}.translate{}".format(base, axis))
+                if tgtVal >= srcVal:
+                    mel.eval('print ("RESULT : +{} created\\n")'.format(axis))
+                    doAim(target, offset, root, posAim, upVec)
+                else:
+                    mel.eval('print ("RESULT : -{} created\\n")'.format(axis))
+                    doAim(target, offset, root, negAim, upVec)
+
+                if world:
+                    cmds.pointConstraint(root, base)
+                else:
+                    cmds.pointConstraint(base, root)
+                cmds.orientConstraint(offset, base)
+                final_targets.append(target)
+                mel.eval('print ("RESULT : [{}] manual create <COMPLETE>\\n")'.format(target))
+
+            cmds.select(deselect=True)
+            if final_targets:
+                cmds.select(final_targets)
+        finally:
+            cmds.refresh(suspend=False)
+    finally:
+        cmds.undoInfo(closeChunk=True)
 
 def createDisplayLocator(name,parent=None,scale=1,color=None):
     loc = cmds.spaceLocator(n=name)[0]
@@ -218,7 +272,6 @@ def createDisplayLocator(name,parent=None,scale=1,color=None):
     cmds.setAttr("{}.localScaleY".format(loc), y_scale)
     cmds.setAttr("{}.localScaleZ".format(loc), z_scale)
     cmds.setAttr("{}.v".format(loc), l=True,k=False,cb=False)
-    # display color
     if color is not None:
         cmds.setAttr("{}.overrideEnabled".format(loc), 1)
         cmds.setAttr("{}.overrideRGBColors".format(loc), 1)
@@ -234,7 +287,6 @@ def _node_name(node):
     return node.rsplit("|", 1)[-1]
     
 def crvSpawn(off,tar):
-    print(off,tar)
     if not cmds.objExists(off):
         cmds.warning("{} does not exist".format(off))
         return None
@@ -258,6 +310,8 @@ def crvSpawn(off,tar):
         cmds.setAttr("{}.lineWidth".format(shape), 3)
         cmds.setAttr("{}.overrideEnabled".format(shape), 1)
         cmds.setAttr("{}.overrideDisplayType".format(shape), 2)
+        cmds.setAttr("{}.useOutlinerColor".format(newCurve), 1)
+        cmds.setAttr("{}.outlinerColor".format(newCurve), 0.5, 0.5, 0.5)
         desiredShapeName = "{}Shape".format(curveName)
         if shape != desiredShapeName:
             try:
@@ -352,7 +406,7 @@ def createAimSpace(axis, posNegToggle, intF=None, cbWorldMn1=None):
         cmds.warning("Temp aimspace nodes already exist. Remove them first:\n{}".format(", ".join(existingNodes)))
         return
 
-    createdRoots = []
+    createdTar = []
     if cbWorldMn1:
         world = cmds.checkBox(cbWorldMn1, q=True, v=True)
     else:
@@ -362,13 +416,22 @@ def createAimSpace(axis, posNegToggle, intF=None, cbWorldMn1=None):
     try:
         cmds.refresh(suspend=True)
         try:
+            temp_constraints = []
+            bake_targets = []
+            created_data = []
+
             for obj in sel:
                 rootName, offName, tarName = objNodeMap[obj]
 
-                root = createDisplayLocator(rootName)
-                off  = createDisplayLocator(offName, parent=root)
-                tar  = createDisplayLocator(tarName, scale=(25,25,25), color=(0,0.6,0.6))
-                createdRoots.append(root)
+                try:
+                    root = createDisplayLocator(rootName)
+                    off  = createDisplayLocator(offName, parent=root)
+                    tar  = createDisplayLocator(tarName, scale=(25,25,25), color=(0,0.6,0.6))
+                except Exception as e:
+                    cmds.warning("Failed to create display locators for [{}]: {}".format(obj, e))
+                    continue
+
+                createdTar.append(tar)
 
                 tmpConst1 = cmds.parentConstraint(obj, root, mo=False)
                 tmpConst2 = cmds.parentConstraint(obj, tar, mo=False)
@@ -379,15 +442,26 @@ def createAimSpace(axis, posNegToggle, intF=None, cbWorldMn1=None):
                 cmds.xform(tar, r=True, os=True, t=offset)
                 buildAimReference(off,tar)
 
-                tempConst = cmds.parentConstraint(obj, tar, mo=True)[0]
-                _bake_nodes([tar],minTime,maxTime)
-                cmds.filterCurve(tar)
-                cmds.delete(tempConst)
+                tempConst_tar = cmds.parentConstraint(obj, tar, mo=True)[0]
+                tempConst_root = cmds.parentConstraint(obj, root, mo=True)[0]
+                temp_constraints.extend([tempConst_tar, tempConst_root])
+                bake_targets.extend([tar, root])
+                created_data.append((obj, root, off, tar))
 
-                # aim setup
-                aimVec = tuple(v * sign for v in AXIS_DATA[axis]['aim'])
-                upVec  = AXIS_DATA[axis]['up']
+            if not created_data:
+                cmds.warning("No valid objects were prepared for aimspace creation")
+                return
 
+            unique_bake_targets = list(dict.fromkeys(bake_targets))
+            _bake_nodes(unique_bake_targets, minTime, maxTime)
+            cmds.filterCurve(*unique_bake_targets)
+            if temp_constraints:
+                cmds.delete(temp_constraints)
+
+            aimVec = tuple(v * sign for v in AXIS_DATA[axis]['aim'])
+            upVec  = AXIS_DATA[axis]['up']
+
+            for obj, root, off, tar in created_data:
                 cmds.aimConstraint(
                     tar, off,
                     mo=True,
@@ -410,6 +484,6 @@ def createAimSpace(axis, posNegToggle, intF=None, cbWorldMn1=None):
         raise
     finally:
         cmds.undoInfo(closeChunk=True)
-    if createdRoots:
-        cmds.select(createdRoots, r=True)
+    if createdTar:
+        cmds.select(createdTar, r=True)
     mel.eval('print ("RESULT : aimspace created\\n")')
